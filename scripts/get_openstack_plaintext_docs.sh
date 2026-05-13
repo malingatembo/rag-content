@@ -125,16 +125,43 @@ log_and_die() {
 generate_text_doc() {
     local project=$1
     local _os_version=$2
+
+    # OSPRH-27424: Project-specific workarounds for setuptools 70+ and cryptography 47+ compatibility
+    # - setuptools 70+ removed pkg_resources (breaks sphinxcontrib-actdiag)
+    # - cryptography 47+ removed SECT571K1 curves (breaks cursive library)
+    # - Some projects have constraint conflicts with dev version (0.0.0)
+    local install_cmd="pip install -c{env:TOX_CONSTRAINTS_FILE:https://releases.openstack.org/constraints/upper/$_os_version} {opts} {packages}"
+    local deps_prefix=""
+
+    if [ "$project" == "horizon" ]; then
+        # Horizon needs --no-build-isolation because XStatic packages create isolated
+        # build environments that get latest setuptools, ignoring our setuptools<82 pin
+        install_cmd="pip install --no-build-isolation {opts} {packages}"
+        deps_prefix="  setuptools<82
+"
+    elif [ "$project" == "python-openstackclient" ]; then
+        # Remove constraints from install_command to avoid 0.0.0 version conflicts
+        install_cmd="pip install {opts} {packages}"
+    elif [ "$project" == "cinder" ]; then
+        deps_prefix="  setuptools<82
+  cryptography<47
+"
+    elif [ "$project" == "placement" ]; then
+        deps_prefix="  setuptools<82
+"
+    fi
+
     local tox_text_docs_target="
 
 [testenv:text-docs]
 description =
     Build documentation in text format.
 basepython = $PYTHON
+install_command = $install_cmd
 commands =
   sphinx-build --keep-going -j auto -b text doc/source doc/build/text
 deps =
-  -c{env:TOX_CONSTRAINTS_FILE:https://releases.openstack.org/constraints/upper/$_os_version}
+${deps_prefix}  -c{env:TOX_CONSTRAINTS_FILE:https://releases.openstack.org/constraints/upper/$_os_version}
   -r{toxinidir}/doc/requirements.txt
 "
 
